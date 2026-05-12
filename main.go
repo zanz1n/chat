@@ -2,20 +2,28 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-	"github.com/gofiber/fiber/v3"
+	"github.com/gorilla/rpc/v2"
+	"github.com/gorilla/rpc/v2/json"
+	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"izanr.com/chat/config"
 	sql1 "izanr.com/chat/sql"
 )
 
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
 func main() {
-	start := time.Now()
 	cfg := config.Get()
 
 	ch := make(chan os.Signal, 1)
@@ -23,7 +31,44 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	app := fiber.New()
+	pool, err := setupDB(ctx)
+	if err != nil {
+		log.Fatalf("Setup DB failed: %s", err)
+	}
+	defer pool.Close()
+
+	server := rpc.NewServer()
+	server.RegisterCodec(json.NewCodec(), "application/json")
+
+	mux := http.NewServeMux()
+
+	mux.Handle("POST /rpc", server)
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			slog.Error(
+				"HTTP: Upgrade connection failed",
+				"from", r.RemoteAddr,
+				"error", err,
+			)
+			return
+		}
+		defer conn.Close()
+
+		for {
+			kind, rd, err := conn.NextReader()
+			if err != nil {
+				break
+			}
+
+			_, _ = kind, rd
+		}
+	})
+
+	srv := &http.Server{
+		Addr:    cfg.GetAddr(),
+		Handler: mux,
+	}
 
 	go func() {
 		sig := <-ch
@@ -31,8 +76,11 @@ func main() {
 
 		slog.Warn("Cancellation received", "signal", sig.String())
 
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel2()
+
 		start := time.Now()
-		err := app.ShutdownWithTimeout(3 * time.Second)
+		err := srv.Shutdown(ctx2)
 		if err != nil {
 			slog.Error("Failed to shutdown app", "error", err)
 		} else {
@@ -43,30 +91,24 @@ func main() {
 		}
 	}()
 
-	app.Hooks().OnListen(func(data fiber.ListenData) error {
-		slog.Info(
-			"HTTP: Listening",
-			"addr", cfg.GetAddr(),
-			"prefork", cfg.App.Prefork,
-			"took", time.Since(start).Round(time.Microsecond),
-		)
-		return nil
-	})
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatalf("Failed to listen and serve: %s", err)
+	}
+}
+
+func setupDB(ctx context.Context) (*pgxpool.Pool, error) {
+	cfg := config.Get()
 
 	pool, err := pgxpool.New(ctx, cfg.DB.URL())
 	if err != nil {
-		log.Fatalf("Failed to open postgres DB: %s\n", err)
+		return nil, fmt.Errorf("open pool: %w", err)
 	}
 
 	if cfg.DB.Migrate {
-		err := sql1.Migrate(ctx, pool)
-		if err != nil {
-			log.Fatalf("Failed to migrate DB: %s\n", err)
+		if err = sql1.Migrate(ctx, pool); err != nil {
+			return nil, fmt.Errorf("migrate: %w", err)
 		}
 	}
 
-	app.Listen(cfg.GetAddr(), fiber.ListenConfig{
-		EnablePrefork:         cfg.App.Prefork,
-		DisableStartupMessage: true,
-	})
+	return pool, nil
 }
