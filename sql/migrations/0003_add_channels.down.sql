@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS direct_channels;
+
+DROP TABLE IF EXISTS members;
+
+DROP TABLE IF EXISTS channels;
