@@ -1,0 +1,9 @@
+/data
+/bin
+/tmp
+*_validator.go
+*_generate.go
+
+compose.yml
+postgres.dockerfile
+README.md

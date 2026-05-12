@@ -1,0 +1,45 @@
+x-common:
+  app-name: &app-name GoChat
+  postgres-user: &pg-user docker
+  postgres-password: &pg-passwd docker
+
+# ------------
+# DO NOT TOUCH
+# ------------
+
+x-env:
+  app: &app-env
+    NAME: *app-name
+    POSTGRES_ADDR: postgres
+  postgres: &postgres-env
+    POSTGRES_DB: chat
+    POSTGRES_USER: *pg-user
+    POSTGRES_PASSWORD: *pg-passwd
+
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    command: ["--migrate", "--config=env", "--port=8080"]
+    links:
+      - postgres
+    environment:
+      <<: [*postgres-env, *app-env]
+    networks:
+      - default
+    ports:
+      - 8080:8080
+
+  postgres:
+    build:
+      dockerfile: postgres.dockerfile
+    restart: unless-stopped
+    environment:
+      <<: [*postgres-env]
+    networks:
+      - default
+    volumes:
+      - ./data/postgres/:/var/lib/postgresql/
+
+networks:
+  default:
