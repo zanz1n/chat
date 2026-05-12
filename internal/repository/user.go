@@ -47,8 +47,7 @@ func NewPgUsers(q utils.Querier) UserStorer {
 func (r *users) Insert(ctx context.Context, data dto.UserCreateData) (dto.User, error) {
 	password := utils.HashPassword(data.Password)
 
-	// TODO: check for conflict
-	return r.selectOne(ctx, query_users_insert,
+	u, err := r.selectOne(ctx, query_users_insert,
 		data.Username,
 		data.DisplayName,
 		data.Email,
@@ -56,6 +55,12 @@ func (r *users) Insert(ctx context.Context, data dto.UserCreateData) (dto.User, 
 		dto.UserRoleDefault,
 		password,
 	)
+	if err != nil {
+		if isConflict(err) {
+			err = ErrUserAlreadyExists
+		}
+	}
+	return u, err
 }
 
 func (r *users) GetById(ctx context.Context, id uuid.UUID) (dto.User, error) {
@@ -85,8 +90,13 @@ func (r *users) UpdateUsername(
 	id uuid.UUID,
 	username string,
 ) (dto.User, error) {
-	// TODO: check for conflict
-	return r.selectOne(ctx, query_users_update_username, id, username)
+	u, err := r.selectOne(ctx, query_users_update_username, id, username)
+	if err != nil {
+		if isConflict(err) {
+			err = ErrUserAlreadyExists
+		}
+	}
+	return u, err
 }
 
 func (r *users) Update(
