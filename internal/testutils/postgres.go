@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -28,6 +29,21 @@ type pgcontaienr struct {
 	*postgres.PostgresContainer
 	user     string
 	password string
+	basedb   string
+}
+
+func (c *pgcontaienr) ConnStr(ctx context.Context, db string) (string, error) {
+	endpoint, err := c.PortEndpoint(ctx, "5432/tcp", "")
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
+		c.user,
+		c.password,
+		endpoint,
+		db,
+	), nil
 }
 
 func (c *pgcontaienr) ExecSQL(ctx context.Context, sql string) (int, error) {
@@ -78,24 +94,44 @@ var onceDB = sync.OnceValues(func() (*pgcontaienr, error) {
 		return nil, err
 	}
 
-	// necessary for postgres to spin up correctly
-	// time.Sleep(3 * time.Second)
-
 	res := new(pgcontaienr{
 		PostgresContainer: pg,
 		user:              username,
 		password:          password,
+		basedb:            username,
 	})
 
 	log.Printf(
 		"DBUtils: Postgres container running after[%v]",
 		time.Since(start).Round(time.Millisecond),
 	)
+	start = time.Now()
+
+	connstr, err := res.ConnStr(ctx, res.basedb)
+	if err != nil {
+		return nil, err
+	}
+
+	pool, err := pgxpool.New(ctx, connstr)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Close()
+
+	if err = sql1.MigrateSkipKV(ctx, pool); err != nil {
+		return nil, err
+	}
+
+	log.Printf(
+		"DBUtils: Migrated postgres db[%s] took[%v]",
+		res.basedb,
+		time.Since(start).Round(time.Millisecond),
+	)
 
 	return res, nil
 })
 
-func CreateDatabase(t *testing.T) (*pgxpool.Pool, func()) {
+func CreateDatabase(t *testing.T) (*pgx.Conn, func()) {
 	assert := require.New(t)
 
 	container, err := onceDB()
@@ -103,41 +139,31 @@ func CreateDatabase(t *testing.T) (*pgxpool.Pool, func()) {
 
 	start := time.Now()
 
-	endpoint, err := container.PortEndpoint(t.Context(), "5432/tcp", "")
-	assert.NoError(err, "Run postgres testcontainer failed")
-
 	dbName := "db_" + RandomStringLower(8)
 	ecode, err := container.ExecSQL(t.Context(),
-		fmt.Sprintf("CREATE DATABASE %s;", dbName),
+		fmt.Sprintf("CREATE DATABASE %s TEMPLATE %s STRATEGY=FILE_COPY;",
+			dbName,
+			container.basedb,
+		),
 	)
 	assert.NoErrorf(err, "Create postgres db %s failed", dbName)
 	assert.Equal(0, ecode)
 
-	connstr := fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable",
-		container.user,
-		container.password,
-		endpoint,
-		dbName,
-	)
+	connstr, err := container.ConnStr(t.Context(), dbName)
+	assert.NoError(err)
 
-	pool, err := pgxpool.New(t.Context(), connstr)
-	assert.NoError(err, "Connect to postgres failed")
-
-	err = sql1.MigrateSkipKV(t.Context(), pool)
-	assert.NoError(err, "Migrate postgres failed")
+	conn, err := pgx.Connect(t.Context(), connstr)
 
 	log.Printf("DBUtils: Created test db[%s] took[%v]",
 		dbName,
 		time.Since(start).Round(time.Millisecond),
 	)
 
-	return pool, func() {
+	return conn, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		defer pool.Close()
-
-		_ = ctx
+		defer conn.Close(ctx)
 
 		_, err := container.ExecSQL(ctx,
 			fmt.Sprintf("DROP DATABASE %s WITH (FORCE);", dbName),
