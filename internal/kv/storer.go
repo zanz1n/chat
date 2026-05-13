@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-type KeyValueStorer interface {
+type Storer interface {
 	// Normally returns a new KV storer that appends a prefix line
 	// {dom}.{key} to every operation.
-	WithDomain(dom string) KeyValueStorer
+	WithDomain(dom string) Storer
 
 	Get(ctx context.Context, key string, out any) (bool, error)
 	GetTTL(ctx context.Context, key string, ttl time.Duration, out any) (bool, error)

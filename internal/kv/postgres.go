@@ -17,22 +17,22 @@ type pgstorer struct {
 	prefix string
 }
 
-func NewPgStorer(pool *pgxpool.Pool) KeyValueStorer {
+func NewPgStorer(pool *pgxpool.Pool) Storer {
 	return &pgstorer{
 		db:     pool,
 		prefix: "",
 	}
 }
 
-// WithDomain implements [KeyValueStorer].
-func (s *pgstorer) WithDomain(dom string) KeyValueStorer {
+// WithDomain implements [Storer].
+func (s *pgstorer) WithDomain(dom string) Storer {
 	return &pgstorer{
 		db:     s.db,
-		prefix: dom + ".",
+		prefix: s.prefix + dom + ".",
 	}
 }
 
-// Get implements [KeyValueStorer].
+// Get implements [Storer].
 func (s *pgstorer) Get(ctx context.Context, key string, out any) (bool, error) {
 	const query = "SELECT value FROM key_value WHERE key = $1 AND expiration > now();"
 
@@ -40,7 +40,7 @@ func (s *pgstorer) Get(ctx context.Context, key string, out any) (bool, error) {
 	return s.execGet(ctx, query, out, key)
 }
 
-// GetTTL implements [KeyValueStorer].
+// GetTTL implements [Storer].
 func (s *pgstorer) GetTTL(
 	ctx context.Context,
 	key string,
@@ -55,7 +55,7 @@ func (s *pgstorer) GetTTL(
 	return s.execGet(ctx, query, out, key, time.Now().Add(ttl))
 }
 
-// GetString implements [KeyValueStorer].
+// GetString implements [Storer].
 func (s *pgstorer) GetString(ctx context.Context, key string) (string, error) {
 	var out string
 	ok, err := s.Get(ctx, key, &out)
@@ -65,7 +65,7 @@ func (s *pgstorer) GetString(ctx context.Context, key string) (string, error) {
 	return out, nil
 }
 
-// GetStringTTL implements [KeyValueStorer].
+// GetStringTTL implements [Storer].
 func (s *pgstorer) GetStringTTL(
 	ctx context.Context,
 	key string,
@@ -79,17 +79,17 @@ func (s *pgstorer) GetStringTTL(
 	return out, nil
 }
 
-// Set implements [KeyValueStorer].
+// Set implements [Storer].
 func (s *pgstorer) Set(ctx context.Context, key string, value any) error {
 	return s.execSet(ctx, key, value, nil)
 }
 
-// SetTTL implements [KeyValueStorer].
+// SetTTL implements [Storer].
 func (s *pgstorer) SetTTL(ctx context.Context, key string, value any, ttl time.Duration) error {
 	return s.execSet(ctx, key, value, &ttl)
 }
 
-// Delete implements [KeyValueStorer].
+// Delete implements [Storer].
 func (s *pgstorer) Delete(ctx context.Context, key string) error {
 	const query = "DELETE FROM key_value WHERE key = $1;"
 
@@ -98,7 +98,7 @@ func (s *pgstorer) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-// DeleteExists implements [KeyValueStorer].
+// DeleteExists implements [Storer].
 func (s *pgstorer) DeleteExists(ctx context.Context, key string) (bool, error) {
 	const query = "DELETE FROM key_value WHERE key = $1 AND expiration > now() " +
 		"RETURNING key;"
@@ -117,7 +117,7 @@ func (s *pgstorer) DeleteExists(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-// DeleteGet implements [KeyValueStorer].
+// DeleteGet implements [Storer].
 func (s *pgstorer) DeleteGet(ctx context.Context, key string, out any) (bool, error) {
 	const query = "DELETE FROM key_value WHERE key = $1 AND expiration > now() " +
 		"RETURNING value;"
@@ -126,7 +126,7 @@ func (s *pgstorer) DeleteGet(ctx context.Context, key string, out any) (bool, er
 	return s.execGet(ctx, query, out, key)
 }
 
-// DeleteGetString implements [KeyValueStorer].
+// DeleteGetString implements [Storer].
 func (s *pgstorer) DeleteGetString(ctx context.Context, key string) (string, error) {
 	var out string
 	ok, err := s.DeleteGet(ctx, key, &out)
