@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -71,8 +72,10 @@ func _migrate(ctx context.Context, m *migrate.Migrate) (uint, bool, error) {
 	defer close(finish)
 
 	if err := m.Up(); err != nil {
-		finish <- struct{}{}
-		return 0, false, err
+		if !errors.Is(err, migrate.ErrNoChange) {
+			finish <- struct{}{}
+			return 0, false, err
+		}
 	}
 	finish <- struct{}{}
 
