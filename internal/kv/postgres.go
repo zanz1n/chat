@@ -8,18 +8,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"izanr.com/chat/internal/utils"
 )
 
 type pgstorer struct {
-	db     *pgxpool.Pool
+	q      utils.Querier
 	prefix string
 }
 
-func NewPgStorer(pool *pgxpool.Pool) Storer {
+func NewPgStorer(q utils.Querier) Storer {
 	return &pgstorer{
-		db:     pool,
+		q:      q,
 		prefix: "",
 	}
 }
@@ -27,7 +26,7 @@ func NewPgStorer(pool *pgxpool.Pool) Storer {
 // WithDomain implements [Storer].
 func (s *pgstorer) WithDomain(dom string) Storer {
 	return &pgstorer{
-		db:     s.db,
+		q:      s.q,
 		prefix: s.prefix + dom + ".",
 	}
 }
@@ -94,7 +93,7 @@ func (s *pgstorer) Delete(ctx context.Context, key string) error {
 	const query = "DELETE FROM key_value WHERE key = $1;"
 
 	key = s.prefix + key
-	_, err := s.db.Exec(ctx, query, key)
+	_, err := s.q.Exec(ctx, query, key)
 	return err
 }
 
@@ -104,7 +103,7 @@ func (s *pgstorer) DeleteExists(ctx context.Context, key string) (bool, error) {
 		"RETURNING key;"
 
 	key = s.prefix + key
-	row := s.db.QueryRow(ctx, query, key)
+	row := s.q.QueryRow(ctx, query, key)
 
 	var out string
 	if err := row.Scan(&out); err != nil {
@@ -158,7 +157,7 @@ func (s *pgstorer) execSet(ctx context.Context, key string, value any, ttl *time
 	}
 
 	key = s.prefix + key
-	cmd, err := s.db.Exec(ctx, query, key, expiration, encv)
+	cmd, err := s.q.Exec(ctx, query, key, expiration, encv)
 	if err != nil {
 		return err
 	}
@@ -176,7 +175,7 @@ func (s *pgstorer) execGet(
 	out any,
 	args ...any,
 ) (bool, error) {
-	row := s.db.QueryRow(ctx, query, args...)
+	row := s.q.QueryRow(ctx, query, args...)
 
 	var b []byte
 	if err := row.Scan(&b); err != nil {
