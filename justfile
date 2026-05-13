@@ -57,7 +57,7 @@ data:
     mkdir -p {{ DATA }}
 
 clear:
-    #!/bin/bash
+    #!/bin/sh
     shopt -s globstar
     rm -f ./**/*_validator.go
     rm -f ./**/*_generate.go
